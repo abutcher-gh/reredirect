@@ -37,12 +37,16 @@ static void usage() {
     fprintf(stderr, "Usage: %s [-m FILE|-o FILE|-e FILE|-O FD|-E FD] [-N] [-d] PID\n", me);
     fprintf(stderr, "%s redirect outputs of a running process to a file.\n", me);
     fprintf(stderr, "  PID      Process to reattach\n");
-    fprintf(stderr, "  -o FILE  File to redirect stdout. \n");
+    fprintf(stderr, "  -o FILE  File to redirect stdout.\n");
     fprintf(stderr, "  -e FILE  File to redirect stderr.\n");
     fprintf(stderr, "  -m FILE  Same than -o FILE -e FILE.\n");
     fprintf(stderr, "  -O FD    Redirect stdout to this file descriptor. Mainly used to restore\n");
     fprintf(stderr, "           process outputs.\n");
     fprintf(stderr, "  -E FD    Redirect stderr to this file descriptor. Mainly used to restore\n");
+    fprintf(stderr, "           process outputs.\n");
+    fprintf(stderr, "  -f CUSTOMFD  Custom fd to redirect.\n");
+    fprintf(stderr, "  -c FILE  File to redirect CUSTOMFD.\n");
+    fprintf(stderr, "  -C FD    Redirect CUSTOMFD to this file descriptor. Mainly used to restore\n");
     fprintf(stderr, "           process outputs.\n");
     fprintf(stderr, "  -N       Do not save previous stream.\n");
     fprintf(stderr, "\n");
@@ -119,17 +123,21 @@ int main(int argc, char **argv) {
     int no_restore = 0;
     int fde = -1;
     int fdo = -1;
+    int customfd = -1;
+    int fdc = -1;
     int fde_orig = -1;
     int fdo_orig = -1;
+    int fdc_orig = -1;
     const char *fileo = NULL;
     const char *filee = NULL;
+    const char *filec = NULL;
     pid_t pid;
     int opt;
     int err;
     unsigned long scratch_page = (unsigned long) -1;
     struct ptrace_child child;
 
-    while ((opt = getopt(argc, argv, "m:o:e:O:E:s:dNvh")) != -1) {
+    while ((opt = getopt(argc, argv, "m:o:e:f:c:O:E:C:s:dNvh")) != -1) {
         switch (opt) {
             case 'O':
                 if (fileo || fdo >= 0)
@@ -150,6 +158,19 @@ int main(int argc, char **argv) {
                 if (filee || fde >= 0)
                     usage_die("-m, -e and -E are exclusive\n");
                 filee = optarg;
+                break;
+            case 'f':
+                customfd = atoi(optarg);
+                break;
+            case 'c':
+                if (filec || fdc >= 0)
+                    usage_die("-m, -c and -C are exclusive\n");
+                filec = optarg;
+                break;
+            case 'C':
+                if (filec || fdc >= 0)
+                    usage_die("-m, -c and -C are exclusive\n");
+                fdc = atoi(optarg);
                 break;
             case 'm':
                 if (filee || fde >= 0 || fileo || fdo >= 0)
@@ -191,15 +212,21 @@ int main(int argc, char **argv) {
         fdo = child_open(&child, scratch_page, fileo);
     if (filee)
         fde = child_open(&child, scratch_page, filee);
+    if (filec)
+        fdc = child_open(&child, scratch_page, filec);
     if (fdo >= 0)
         fdo_orig = child_dup(&child, fdo, 1, !no_restore);
     if (fde >= 0)
         fde_orig = child_dup(&child, fde, 2, !no_restore);
+    if (fdc >= 0 && customfd >= 0)
+        fdc_orig = child_dup(&child, fdc, customfd, !no_restore);
     child_detach(&child, scratch_page);
 
     if (!no_restore) {
         printf("# Previous state saved. To restore, use:\n");
         printf("%s -N -O %d -E %d %d\n", program_invocation_name, fdo_orig, fde_orig, pid);
+        if (fdc >= 0 && customfd >= 0)
+           printf("%s -N -f %d -C %d %d\n", program_invocation_name, customfd, fdc_orig, pid);
     }
 
     return 0;
